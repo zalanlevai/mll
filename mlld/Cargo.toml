@@ -1,0 +1,4 @@
+[package]
+name = "mlld"
+version = "0.0.0"
+edition = "2024"

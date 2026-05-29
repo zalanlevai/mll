@@ -1,0 +1,8 @@
+[package]
+name = "mll-ctl"
+version = "0.0.0"
+edition = "2024"
+
+[[bin]]
+name = "mll"
+path = "src/main.rs"
