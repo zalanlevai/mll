@@ -1,0 +1,40 @@
+name: tests
+
+on:
+  push:
+    branches:
+      - "main"
+  pull_request:
+    branches:
+      - "main"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        # NOTE: We do not run CI on `windows-latest`, as we currently do not support Windows.
+        os: ["ubuntu-latest", "macos-latest"]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      # Install Rust toolchain specified in rust-toolchain.toml.
+      - name: Install Rust toolchain
+        run: rustc --version
+
+      - name: Build mlld and mll-ctl
+        run: |
+          cargo build -p mlld
+          cargo build -p mll-ctl
+
+      - name: Run unit tests
+        run: |
+          cargo test -p mlld --no-fail-fast -- --color=always
