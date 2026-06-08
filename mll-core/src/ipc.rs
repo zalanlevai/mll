@@ -177,6 +177,7 @@ pub enum Completion<T, E> {
 pub enum ControlMessage {
     Load { model_name: String },
     Unload { model_name: String },
+    ReloadConfig,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -253,4 +254,26 @@ pub enum UnloadProgress {
     StdoutLine { line: String },
     StderrLine { line: String },
     Completion(Completion<(), UnloadError> ),
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "warning")]
+pub enum ConfigWarning {
+    PortChangeRequiresRestart,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "error")]
+pub enum ReloadConfigError {
+    Io { inner_error: String },
+    Parsing { inner_error: String },
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "reload_config_progress")]
+pub enum ReloadConfigProgress {
+    Completion(Completion<(PathBuf, Vec<ConfigWarning>), (PathBuf, ReloadConfigError)>),
 }

@@ -114,3 +114,39 @@ pub fn unload(mut daemon_socket_stream: DaemonSocketStream, model_name: &str) ->
         }
     }
 }
+
+pub fn reload_config(mut daemon_socket_stream: DaemonSocketStream) -> ! {
+    daemon_socket_stream.must_send(&ipc::ControlMessage::ReloadConfig);
+
+    loop {
+        match daemon_socket_stream.must_recv::<ipc::ReloadConfigProgress>() {
+            ipc::ReloadConfigProgress::Completion(completion) => {
+                match completion {
+                    ipc::Completion::Success((config_file_path, warnings)) => {
+                        for warning in warnings {
+                            match warning {
+                                ipc::ConfigWarning::PortChangeRequiresRestart => {
+                                    eprintln!("warning: detected a change to the daemon port: this configuration change requires a daemon restart");
+                                }
+                            }
+                        }
+                        eprintln!("reloaded configuration options from `{}`", config_file_path.display());
+                        process::exit(0);
+                    }
+                    ipc::Completion::Failure((config_file_path, error)) => {
+                        match error {
+                            ipc::ReloadConfigError::Io { inner_error } => {
+                                eprintln!("error: cannot read configuration file: {}", inner_error);
+                            }
+                            ipc::ReloadConfigError::Parsing { inner_error } => {
+                                eprintln!("error: cannot parse configuration file: {}", inner_error);
+                            }
+                        }
+                        eprintln!("failed to reload configuration options from `{}`", config_file_path.display());
+                        process::exit(1);
+                    }
+                }
+            }
+        }
+    }
+}

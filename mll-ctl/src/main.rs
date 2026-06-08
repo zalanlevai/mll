@@ -27,6 +27,9 @@ fn main() {
             .about("Unload the specified model.")
             .arg(clap::arg!(<MODEL> "Name of the model to unload, as specified in mll.toml."))
         )
+        .subcommand(clap::Command::new("reload-config")
+            .about("Reload configuration options from the configuration file.")
+        )
         .arg(clap::arg!(-h --help "Print help information: this message or the help of the given subcommand.").action(clap::ArgAction::Help).global(true))
         .arg(clap::arg!(-V --version "Print version information.").action(clap::ArgAction::Version))
         .get_matches();
@@ -50,6 +53,9 @@ fn main() {
         Some(("unload", matches)) => {
             let model_name = matches.get_one::<String>("MODEL").unwrap();
             ops::unload(daemon_socket_stream, model_name);
+        }
+        Some(("reload-config", matches)) => {
+            ops::reload_config(daemon_socket_stream);
         }
         _ => unreachable!("invalid subcommand"),
     }

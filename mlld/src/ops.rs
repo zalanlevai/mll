@@ -3,6 +3,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
+use mll_core::config::Config;
 use mll_core::ipc::{self, AsyncDaemonSocketStream};
 use parking_lot::RwLock;
 use tokio::fs;
@@ -392,4 +393,61 @@ pub(crate) async fn unload(
     daemon_socket_stream = Arc::into_inner(shared_daemon_socket_stream).unwrap().into_inner();
 
     daemon_socket_stream.try_send(&ipc::UnloadProgress::Completion(ipc::Completion::Success(()))).await;
+}
+
+pub(crate) async fn reload_config(
+    dcx: Arc<DaemonCtxt>,
+    mut daemon_socket_stream: AsyncDaemonSocketStream,
+) {
+    let config_file_path = &dcx.config_file_path;
+    eprintln!("requested to reload config file `{}`", config_file_path.display());
+
+    let config_file_canonical_path = match fs::canonicalize(config_file_path).await {
+        Ok(path) => path,
+        Err(error) => {
+            eprintln!("io error: failed to canonicalize path `{}`: {}", config_file_path.display(), error);
+            let ipc_error = ipc::ReloadConfigError::Io { inner_error: format!("{}", error) };
+            daemon_socket_stream.try_send(&ipc::ReloadConfigProgress::Completion(ipc::Completion::Failure((config_file_path.to_owned(), ipc_error)))).await;
+            return;
+        }
+    };
+
+    let config_file = match fs::read_to_string(config_file_path).await {
+        Ok(file) => file,
+        Err(error) => {
+            eprintln!("io error: cannot read config file `{}`: {}", config_file_path.display(), error);
+            let ipc_error = ipc::ReloadConfigError::Io { inner_error: format!("{}", error) };
+            daemon_socket_stream.try_send(&ipc::ReloadConfigProgress::Completion(ipc::Completion::Failure((config_file_canonical_path, ipc_error)))).await;
+            return;
+        }
+    };
+    let mut new_config = match toml::from_str::<Config>(&config_file) {
+        Ok(data) => data,
+        Err(error) => {
+            eprintln!("io error: cannot parse config file `{}`: {}", config_file_path.display(), error);
+            let ipc_error = ipc::ReloadConfigError::Parsing { inner_error: format!("{}", error) };
+            daemon_socket_stream.try_send(&ipc::ReloadConfigProgress::Completion(ipc::Completion::Failure((config_file_canonical_path, ipc_error)))).await;
+            return;
+        }
+    };
+
+    // NOTE: Unfortunately, manually dropping the write guard before the await point generates a coroutine that is too broad,
+    //       and therefore is deduced to be `!Send`. We can place the write guard in a block to circumvent this.
+    //       See https://github.com/rust-lang/rust/issues/69663.
+    let warnings = {
+        let mut warnings = Vec::new();
+        let mut loaded_config_write_guard = dcx.loaded_config.write();
+
+        if new_config.daemon_port != loaded_config_write_guard.daemon_port {
+            eprintln!("warning: new config attempts to change the daemon port: change will take effect upon next startup");
+            warnings.push(ipc::ConfigWarning::PortChangeRequiresRestart);
+            new_config.daemon_port = loaded_config_write_guard.daemon_port;
+        }
+
+        *loaded_config_write_guard = new_config;
+        warnings
+    };
+
+    eprintln!("reloaded config");
+    daemon_socket_stream.try_send(&ipc::ReloadConfigProgress::Completion(ipc::Completion::Success((config_file_canonical_path, warnings)))).await;
 }
