@@ -395,6 +395,34 @@ pub(crate) async fn unload(
     daemon_socket_stream.try_send(&ipc::UnloadProgress::Completion(ipc::Completion::Success(()))).await;
 }
 
+pub(crate) async fn get_models(
+    dcx: Arc<DaemonCtxt>,
+    mut daemon_socket_stream: AsyncDaemonSocketStream,
+) {
+    eprintln!("requested models");
+
+    let models = dcx.loaded_config.read().models.iter()
+        .map(|model_config| {
+            let model_engine_instance = dcx.model_engine_instance(&model_config.name);
+
+            let model_state = match model_engine_instance.map(|engine_instance| engine_instance.read().engine_state) {
+                None => ipc::ModelState::NotLoaded,
+                Some(EngineState::Starting) => ipc::ModelState::Loading,
+                Some(EngineState::Running) => ipc::ModelState::Loaded,
+                Some(EngineState::Stopping) => ipc::ModelState::Unloading,
+            };
+
+            ipc::Model {
+                name: model_config.name.clone(),
+                max_context_tokens: model_config.max_context_tokens,
+                model_state,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    daemon_socket_stream.try_send(&ipc::GetModelsResponse { models }).await;
+}
+
 pub(crate) async fn reload_config(
     dcx: Arc<DaemonCtxt>,
     mut daemon_socket_stream: AsyncDaemonSocketStream,

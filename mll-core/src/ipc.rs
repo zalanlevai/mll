@@ -177,6 +177,7 @@ pub enum Completion<T, E> {
 pub enum ControlMessage {
     Load { model_name: String },
     Unload { model_name: String },
+    GetModels,
     ReloadConfig,
     GetConfig,
 }
@@ -255,6 +256,27 @@ pub enum UnloadProgress {
     StdoutLine { line: String },
     StderrLine { line: String },
     Completion(Completion<(), UnloadError> ),
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelState {
+    NotLoaded,
+    Loading,
+    Loaded,
+    Unloading,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Model {
+    pub name: String,
+    pub max_context_tokens: usize,
+    pub model_state: ModelState,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GetModelsResponse {
+    pub models: Vec<Model>,
 }
 
 #[derive(Serialize, Deserialize)]

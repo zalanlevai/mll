@@ -115,6 +115,27 @@ pub fn unload(mut daemon_socket_stream: DaemonSocketStream, model_name: &str) ->
     }
 }
 
+pub enum ModelListFilter {
+    Loaded,
+}
+
+pub fn list_models(mut daemon_socket_stream: DaemonSocketStream, filters: Vec<ModelListFilter>) -> ! {
+    daemon_socket_stream.must_send(&ipc::ControlMessage::GetModels);
+    let models_response = daemon_socket_stream.must_recv::<ipc::GetModelsResponse>();
+
+    let filtered_models = models_response.models.into_iter().filter(|model| {
+        filters.iter().all(|filter| match filter {
+            ModelListFilter::Loaded => matches!(model.model_state, ipc::ModelState::Loaded),
+        })
+    });
+
+    for model in filtered_models {
+        println!("{}", model.name);
+    }
+
+    process::exit(0);
+}
+
 pub fn reload_config(mut daemon_socket_stream: DaemonSocketStream) -> ! {
     daemon_socket_stream.must_send(&ipc::ControlMessage::ReloadConfig);
 

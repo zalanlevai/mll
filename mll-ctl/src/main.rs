@@ -6,6 +6,8 @@ use mll_core::ipc::{self, DAEMON_SOCKET_PATH, DaemonSocketStream};
 mod launch;
 mod ops;
 
+use crate::ops::ModelListFilter;
+
 fn main() {
     let matches = clap::command!()
         .subcommand_required(true)
@@ -27,6 +29,10 @@ fn main() {
         .subcommand(clap::Command::new("unload")
             .about("Unload the specified model.")
             .arg(clap::arg!(<MODEL> "Name of the model to unload, as specified in mll.toml."))
+        )
+        .subcommand(clap::Command::new("list")
+            .about("List configured models.")
+            .arg(clap::arg!([CATEGORY] "List only the specified models.").value_parser(["all", "loaded"]).default_value("all"))
         )
         .subcommand(clap::Command::new("reload-config")
             .about("Reload configuration options from the configuration file.")
@@ -59,6 +65,14 @@ fn main() {
         Some(("unload", matches)) => {
             let model_name = matches.get_one::<String>("MODEL").unwrap();
             ops::unload(daemon_socket_stream, model_name);
+        }
+        Some(("list", matches)) => {
+            let filters = match matches.get_one::<String>("CATEGORY").unwrap().as_ref() {
+                "all" => vec![],
+                "loaded" => vec![ModelListFilter::Loaded],
+                _ => unreachable!("invalid category argument"),
+            };
+            ops::list_models(daemon_socket_stream, filters);
         }
         Some(("reload-config", matches)) => {
             ops::reload_config(daemon_socket_stream);
