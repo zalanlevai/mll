@@ -1,25 +1,25 @@
 use std::path::PathBuf;
 
-use serde::Deserialize;
+use serde::{Serialize, Deserialize};
 
 pub const DAEMON_SOCKET_PATH: &str = "/tmp/mlld/socket.sock";
 pub const DEFAULT_CONFIG_FILE_PATH: &str = "/etc/mll/mll.toml";
 pub const DEFAULT_LOGS_DIR_PATH: &str = "/tmp/mlld/logs";
 
-#[derive(Copy, Clone, Deserialize)]
+#[derive(Copy, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EngineKind {
     Vllm,
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Engine {
     pub name: String,
     pub kind: EngineKind,
     pub path: PathBuf,
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Model {
     pub name: String,
     pub engine: String,
@@ -28,7 +28,7 @@ pub struct Model {
     pub engine_args: Vec<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Config {
     pub daemon_port: u16,
     pub engine_base_port: Option<u16>,

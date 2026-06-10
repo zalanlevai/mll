@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use serde::{Serialize, Deserialize};
 
-pub use crate::config::DAEMON_SOCKET_PATH;
+pub use crate::config::{DAEMON_SOCKET_PATH, Config};
 
 #[derive(Debug)]
 pub enum DaemonSocketReadError {
@@ -178,6 +178,7 @@ pub enum ControlMessage {
     Load { model_name: String },
     Unload { model_name: String },
     ReloadConfig,
+    GetConfig,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -276,4 +277,9 @@ pub enum ReloadConfigError {
 #[serde(tag = "reload_config_progress")]
 pub enum ReloadConfigProgress {
     Completion(Completion<(PathBuf, Vec<ConfigWarning>), (PathBuf, ReloadConfigError)>),
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GetConfigResponse {
+    pub config: Config,
 }

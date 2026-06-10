@@ -451,3 +451,14 @@ pub(crate) async fn reload_config(
     eprintln!("reloaded config");
     daemon_socket_stream.try_send(&ipc::ReloadConfigProgress::Completion(ipc::Completion::Success((config_file_canonical_path, warnings)))).await;
 }
+
+pub(crate) async fn get_config(
+    dcx: Arc<DaemonCtxt>,
+    mut daemon_socket_stream: AsyncDaemonSocketStream,
+) {
+    eprintln!("requested loaded config");
+
+    let loaded_config = dcx.loaded_config.read().clone();
+
+    daemon_socket_stream.try_send(&ipc::GetConfigResponse { config: loaded_config }).await;
+}

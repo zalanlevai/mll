@@ -34,6 +34,7 @@ async fn handle_ipc_control_request(dcx: Arc<DaemonCtxt>, mut daemon_socket_stre
         ipc::ControlMessage::Load { model_name } => ops::load(dcx, daemon_socket_stream, model_name).await,
         ipc::ControlMessage::Unload { model_name } => ops::unload(dcx, daemon_socket_stream, model_name).await,
         ipc::ControlMessage::ReloadConfig => ops::reload_config(dcx, daemon_socket_stream).await,
+        ipc::ControlMessage::GetConfig => ops::get_config(dcx, daemon_socket_stream).await,
     }
 }
 

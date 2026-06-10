@@ -427,6 +427,7 @@ dependencies = [
  "clap",
  "interprocess",
  "mll-core",
+ "serde",
  "serde_json",
 ]
 
