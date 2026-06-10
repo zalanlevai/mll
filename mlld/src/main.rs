@@ -7,9 +7,11 @@ use std::sync::Arc;
 use interprocess::local_socket::tokio::prelude::*;
 use mll_core::config::{self, DEFAULT_CONFIG_FILE_PATH, Config};
 use mll_core::ipc::{self, DAEMON_SOCKET_PATH, AsyncDaemonSocketStream, DaemonSocketReadError};
+use tokio::net::TcpListener;
 
 mod ctxt;
 mod engine;
+mod gateway;
 mod ops;
 
 use crate::ctxt::DaemonCtxt;
@@ -89,23 +91,39 @@ async fn main() {
         }
     };
 
+    let daemon_port = config.daemon_port;
+    let tcp_listener = match TcpListener::bind(("0.0.0.0", daemon_port)).await {
+        Ok(listener) => listener,
+        Err(error) => {
+            eprintln!("cannot bind port {}: {}", daemon_port, error);
+            process::exit(1);
+        }
+    };
+
     eprintln!("daemon started: listening on socket `{}`", DAEMON_SOCKET_PATH);
 
     let dcx = Arc::new(DaemonCtxt::new(config_file_path, config));
 
-    loop {
-        let daemon_socket_stream = match daemon_socket_listener.accept().await {
-            Ok(stream) => stream,
-            Err(error) => {
-                eprintln!("error accepting incoming daemon socket connection: {}", error);
-                continue;
-            }
-        };
+    let ipc_dcx = Arc::clone(&dcx);
+    tokio::spawn(async move {
+        loop {
+            let daemon_socket_stream = match daemon_socket_listener.accept().await {
+                Ok(stream) => stream,
+                Err(error) => {
+                    eprintln!("error accepting incoming daemon socket connection: {}", error);
+                    continue;
+                }
+            };
 
-        let dcx = Arc::clone(&dcx);
-        tokio::spawn(async move {
-            let daemon_socket_stream = AsyncDaemonSocketStream::new(daemon_socket_stream);
-            handle_ipc_control_request(dcx, daemon_socket_stream).await;
-        });
-    }
+            let dcx = Arc::clone(&ipc_dcx);
+            tokio::spawn(async move {
+                let daemon_socket_stream = AsyncDaemonSocketStream::new(daemon_socket_stream);
+                handle_ipc_control_request(dcx, daemon_socket_stream).await;
+            });
+        }
+    });
+
+    eprintln!("serving gateway on 0.0.0.0:{}", daemon_port);
+    let router = gateway::setup_routes(dcx);
+    axum::serve(tcp_listener, router).await.unwrap();
 }
