@@ -1,22 +1,56 @@
+use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use axum::Json;
-use axum::body::Body;
+use axum::body::{Body, HttpBody};
 use axum::extract::{Request, State};
 use axum::extract::rejection::JsonRejection;
 use axum::http::{Uri, StatusCode};
 use axum::http::uri;
 use axum::response::{IntoResponse, Response};
-use http_body_util::BodyExt;
+use futures::Stream;
+use http_body_util::{BodyDataStream, BodyExt};
 use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
 use mll_core::config;
+use pin_project_lite::pin_project;
 use serde::{Serialize, Deserialize};
 
 use crate::ctxt::DaemonCtxt;
-use crate::engine::EngineState;
+use crate::engine::{EngineState, EngineRequestResponderHandle};
+
+pin_project! {
+    struct ProxiedRequestEngineResponseStream<B> {
+        #[pin]
+        stream: BodyDataStream<B>,
+        engine_request_responder_handle: Option<EngineRequestResponderHandle>,
+    }
+}
+
+impl<B: HttpBody> ProxiedRequestEngineResponseStream<B> {
+    pub fn new(stream: BodyDataStream<B>, engine_request_responder_handle: EngineRequestResponderHandle) -> Self {
+        Self { stream, engine_request_responder_handle: Some(engine_request_responder_handle) }
+    }
+}
+
+impl<B: HttpBody> Stream for ProxiedRequestEngineResponseStream<B> {
+    type Item = Result<B::Data, B::Error>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.project();
+        match this.stream.poll_next(cx) {
+            Poll::Ready(None) => {
+                // NOTE: End of engine response stream, drop the pending engine request handle to singal completion.
+                drop(this.engine_request_responder_handle.take());
+                Poll::Ready(None)
+            }
+            p => p,
+        }
+    }
+}
 
 #[derive(Clone)]
 struct ServerState {
@@ -120,6 +154,8 @@ async fn handle_proxied_engine_request(State(state): State<ServerState>, request
         return Ok((StatusCode::SERVICE_UNAVAILABLE, format!("model `{}` not loaded", request_model_routing_part.model)).into_response())
     };
 
+    let pending_engine_request = engine_instance.track_pending_engine_request();
+
     let engine_port = engine_instance.engine_port;
 
     let proxied_request = {
@@ -134,8 +170,11 @@ async fn handle_proxied_engine_request(State(state): State<ServerState>, request
         Ok(response) => {
             // Convert the response's body type from `hyper::body::Incoming` into `axum::body::Body`.
             let (parts, body) = response.into_parts();
-            let body = Body::from_stream(body.into_data_stream());
+            // NOTE: Keep the pending engine request handle from dropping until the response stream from the proxied engine request is fully received.
+            let response_body_data_stream = ProxiedRequestEngineResponseStream::new(body.into_data_stream(), pending_engine_request);
+            let body = Body::from_stream(response_body_data_stream);
             let response = Response::from_parts(parts, body);
+
             Ok(response)
         }
         Err(error) => {

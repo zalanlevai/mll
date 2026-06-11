@@ -91,12 +91,16 @@ pub fn unload(mut daemon_socket_stream: DaemonSocketStream, model_name: &str) ->
         match daemon_socket_stream.must_recv::<ipc::UnloadProgress>() {
             ipc::UnloadProgress::BadRequest(unload_request_error) => {
                 match unload_request_error {
-                    ipc::UnloadRequestError::NotLoadedModel => {
+                    ipc::UnloadRequestError::ModelNotLoaded => {
                         eprintln!("error: model `{}` not loaded", model_name);
                         process::exit(1);
                     }
-                    ipc::UnloadRequestError::LoadingModel => {
+                    ipc::UnloadRequestError::ModelLoading => {
                         eprintln!("model `{}` loading", model_name);
+                        process::exit(1);
+                    }
+                    ipc::UnloadRequestError::ModelPendingRequests => {
+                        eprintln!("model `{}` has pending requests", model_name);
                         process::exit(1);
                     }
                 }

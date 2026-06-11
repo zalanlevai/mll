@@ -1,7 +1,12 @@
+use std::collections::HashMap;
 use std::io;
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::process::ExitStatus;
+use std::sync::Arc;
+use std::sync::atomic::{self, AtomicU64};
+use std::time::{Duration, Instant};
 
 use parking_lot::RwLock;
 use tokio::fs;
@@ -104,6 +109,48 @@ pub struct RunningEngine {
     pub(crate) task: JoinHandle<ExitStatus>,
 }
 
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub struct PendingEngineRequestId(u64);
+
+impl PendingEngineRequestId {
+    pub fn new() -> Self {
+        // NOTE: Using an ever increasing, wrapping atomic counter is sufficient for disambiguating engine requests,
+        //       as they only have to distinguish pending requests.
+        static ENGINE_REQUEST_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
+        Self(ENGINE_REQUEST_ID_COUNTER.fetch_add(1, atomic::Ordering::Relaxed))
+    }
+}
+
+pub struct PendingEngineRequest {
+    pub start_time: Instant,
+}
+
+impl PendingEngineRequest {
+    pub fn elapsed_since_start(&self) -> Duration {
+        self.start_time.elapsed()
+    }
+}
+
+pub struct EngineRequestResponderHandle {
+    request_id: PendingEngineRequestId,
+    engine_instance: Arc<EngineInstance>,
+    request: Arc<PendingEngineRequest>,
+}
+
+impl Deref for EngineRequestResponderHandle {
+    type Target = PendingEngineRequest;
+
+    fn deref(&self) -> &Self::Target {
+        &self.request
+    }
+}
+
+impl Drop for EngineRequestResponderHandle {
+    fn drop(&mut self) {
+        self.engine_instance.pending_engine_requests.write().remove(&self.request_id);
+    }
+}
+
 pub struct EngineInstance {
     pub(crate) engine_config: config::Engine,
     pub(crate) model_config: config::Model,
@@ -111,11 +158,28 @@ pub struct EngineInstance {
     pub(crate) engine_port: u16,
     pub(crate) engine_state: RwLock<EngineState>,
     pub(crate) running_engine: RwLock<Option<RunningEngine>>,
+    pub(crate) pending_engine_requests: RwLock<HashMap<PendingEngineRequestId, Arc<PendingEngineRequest>>>,
 }
 
 impl EngineInstance {
     pub fn model_name(&self) -> &str {
         &self.model_config.name
+    }
+
+    pub(crate) fn track_pending_engine_request(self: &Arc<Self>) -> EngineRequestResponderHandle {
+        let pending_engine_request_id = PendingEngineRequestId::new();
+
+        let pending_engine_request = Arc::new(PendingEngineRequest {
+            start_time: Instant::now(),
+        });
+
+        self.pending_engine_requests.write().insert(pending_engine_request_id, Arc::clone(&pending_engine_request));
+
+        EngineRequestResponderHandle {
+            request_id: pending_engine_request_id,
+            engine_instance: Arc::clone(self),
+            request: pending_engine_request,
+        }
     }
 }
 

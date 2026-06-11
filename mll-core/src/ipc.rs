@@ -239,8 +239,9 @@ pub enum LoadProgress {
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "error")]
 pub enum UnloadRequestError {
-    NotLoadedModel,
-    LoadingModel,
+    ModelNotLoaded,
+    ModelLoading,
+    ModelPendingRequests,
 }
 
 #[derive(Serialize, Deserialize)]

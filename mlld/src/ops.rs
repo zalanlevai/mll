@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
@@ -84,6 +84,7 @@ pub(crate) async fn load(
         // NOTE: None yet, will be populated once loading is complete and the command is fulfilled,
         //       when we span another task to keep monitoring the running engine.
         running_engine: RwLock::new(None),
+        pending_engine_requests: RwLock::new(HashMap::with_capacity(256)),
     });
     dcx.engine_instances.write().push(Arc::clone(&engine_instance));
     // NOTE: Port reservation no longer required, as the port is now associated with an engine instance.
@@ -326,23 +327,21 @@ pub(crate) async fn unload(
 ) {
     eprintln!("requested to unload model `{}`", model_name);
 
-    let model_engine_instance = 'model_engine_instance: {
-        let mut engine_instances_write_guard = dcx.engine_instances.write();
-        let Some(model_engine_instance_idx) = engine_instances_write_guard.iter()
-            .position(|engine_instance| engine_instance.model_name() == model_name)
-        else { break 'model_engine_instance None; };
-        Some(engine_instances_write_guard.remove(model_engine_instance_idx))
-    };
-
-    let Some(model_engine_instance) = model_engine_instance else {
+    let Some(model_engine_instance) = dcx.model_engine_instance(&model_name) else {
         eprintln!("model `{}` not loaded", model_name);
-        daemon_socket_stream.try_send(&ipc::UnloadProgress::BadRequest(ipc::UnloadRequestError::NotLoadedModel)).await;
+        daemon_socket_stream.try_send(&ipc::UnloadProgress::BadRequest(ipc::UnloadRequestError::ModelNotLoaded)).await;
         return;
     };
 
+    if !model_engine_instance.pending_engine_requests.read().is_empty() {
+        eprintln!("model `{}` has pending requests", model_name);
+        daemon_socket_stream.try_send(&ipc::UnloadProgress::BadRequest(ipc::UnloadRequestError::ModelPendingRequests)).await;
+        return;
+    }
+
     let Some(running_engine) = model_engine_instance.running_engine.write().take() else {
         eprintln!("model `{}` loading", model_name);
-        daemon_socket_stream.try_send(&ipc::UnloadProgress::BadRequest(ipc::UnloadRequestError::LoadingModel)).await;
+        daemon_socket_stream.try_send(&ipc::UnloadProgress::BadRequest(ipc::UnloadRequestError::ModelLoading)).await;
         return;
     };
     *model_engine_instance.engine_state.write() = EngineState::Stopping;
@@ -383,6 +382,17 @@ pub(crate) async fn unload(
             None
         }
     };
+
+    // Remove the stopped engine instance from the daemon's internal accounting.
+    // NOTE: Unfortunately, manually dropping the write guard before the await point generates a coroutine that is too broad,
+    //       and therefore is deduced to be `!Send`. We can place the write guard in a block to circumvent this.
+    //       See https://github.com/rust-lang/rust/issues/69663.
+    {
+        let mut engine_instances_write_guard = dcx.engine_instances.write();
+        if let Some(model_engine_instance_idx) = engine_instances_write_guard.iter().position(|engine_instance| engine_instance.model_name() == model_name) {
+            engine_instances_write_guard.remove(model_engine_instance_idx);
+        }
+    }
 
     // NOTE: Tear down sharing wrappers to get back exclusive ownership over the daemon socket stream.
     daemon_socket_stream = Arc::into_inner(shared_daemon_socket_stream).unwrap().into_inner();
