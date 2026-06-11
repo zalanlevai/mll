@@ -33,7 +33,7 @@ fn main() {
         )
         .subcommand(clap::Command::new("list")
             .about("List configured models.")
-            .arg(clap::arg!([CATEGORY] "List only the specified models.").value_parser(["all", "loaded"]).default_value("all"))
+            .arg(clap::arg!([CATEGORY] "List only the specified models.").value_parser(["all", "loaded", "active", "inactive"]).default_value("all"))
         )
         .subcommand(clap::Command::new("reload-config")
             .about("Reload configuration options from the configuration file.")
@@ -72,6 +72,8 @@ fn main() {
             let filters = match matches.get_one::<String>("CATEGORY").unwrap().as_ref() {
                 "all" => vec![],
                 "loaded" => vec![ModelListFilter::Loaded],
+                "active" => vec![ModelListFilter::Active],
+                "inactive" => vec![ModelListFilter::Inactive],
                 _ => unreachable!("invalid category argument"),
             };
             ops::list_models(daemon_socket_stream, filters);

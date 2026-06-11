@@ -121,6 +121,8 @@ pub fn unload(mut daemon_socket_stream: DaemonSocketStream, model_name: &str, fo
 
 pub enum ModelListFilter {
     Loaded,
+    Active,
+    Inactive,
 }
 
 pub fn list_models(mut daemon_socket_stream: DaemonSocketStream, filters: Vec<ModelListFilter>) -> ! {
@@ -129,7 +131,15 @@ pub fn list_models(mut daemon_socket_stream: DaemonSocketStream, filters: Vec<Mo
 
     let filtered_models = models_response.models.into_iter().filter(|model| {
         filters.iter().all(|filter| match filter {
-            ModelListFilter::Loaded => matches!(model.model_state, ipc::ModelState::Loaded),
+            ModelListFilter::Loaded => matches!(model.model_state, ipc::ModelState::Loaded(_)),
+            ModelListFilter::Active => {
+                let ipc::ModelState::Loaded(loaded_model) = &model.model_state else { return false; };
+                loaded_model.model_activity.pending_requests_count >= 1
+            }
+            ModelListFilter::Inactive => {
+                let ipc::ModelState::Loaded(loaded_model) = &model.model_state else { return false; };
+                loaded_model.model_activity.pending_requests_count == 0
+            }
         })
     });
 

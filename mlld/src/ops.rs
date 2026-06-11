@@ -411,11 +411,19 @@ pub(crate) async fn get_models(
         .map(|model_config| {
             let model_engine_instance = dcx.model_engine_instance(&model_config.name);
 
-            let model_state = match model_engine_instance.map(|engine_instance| *engine_instance.engine_state.read()) {
-                None => ipc::ModelState::NotLoaded,
-                Some(EngineState::Starting) => ipc::ModelState::Loading,
-                Some(EngineState::Running) => ipc::ModelState::Loaded,
-                Some(EngineState::Stopping) => ipc::ModelState::Unloading,
+            let model_state = 'model_state: {
+                let Some(model_engine_instance) = model_engine_instance else { break 'model_state ipc::ModelState::NotLoaded; };
+
+                match *model_engine_instance.engine_state.read() {
+                    EngineState::Starting => ipc::ModelState::Loading,
+                    EngineState::Running => {
+                        let model_activity = ipc::ModelActivity {
+                            pending_requests_count: model_engine_instance.pending_engine_requests.read().len(),
+                        };
+                        ipc::ModelState::Loaded(ipc::LoadedModel { model_activity })
+                    }
+                    EngineState::Stopping => ipc::ModelState::Unloading,
+                }
             };
 
             ipc::Model {

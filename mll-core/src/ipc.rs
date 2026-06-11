@@ -260,11 +260,22 @@ pub enum UnloadProgress {
 }
 
 #[derive(Serialize, Deserialize)]
+pub struct ModelActivity {
+    pub pending_requests_count: usize,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct LoadedModel {
+    pub model_activity: ModelActivity,
+}
+
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[serde(tag = "model_state")]
 pub enum ModelState {
     NotLoaded,
     Loading,
-    Loaded,
+    Loaded(LoadedModel),
     Unloading,
 }
 
