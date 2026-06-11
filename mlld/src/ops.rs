@@ -75,16 +75,16 @@ pub(crate) async fn load(
     cmd.arg(format!("--max-model-len={}", model_config.max_context_tokens));
     cmd.args(&model_config.engine_args);
 
-    let engine_instance = Arc::new(RwLock::new(EngineInstance {
+    let engine_instance = Arc::new(EngineInstance {
         engine_config,
         model_config,
         log_file_path: log_file_path.clone(),
         engine_port: engine_port_reservation.port(),
-        engine_state: EngineState::Starting,
+        engine_state: RwLock::new(EngineState::Starting),
         // NOTE: None yet, will be populated once loading is complete and the command is fulfilled,
         //       when we span another task to keep monitoring the running engine.
-        running_engine: None,
-    }));
+        running_engine: RwLock::new(None),
+    });
     dcx.engine_instances.write().push(Arc::clone(&engine_instance));
     // NOTE: Port reservation no longer required, as the port is now associated with an engine instance.
     drop(engine_port_reservation);
@@ -124,8 +124,7 @@ pub(crate) async fn load(
             daemon_socket_stream.try_send(&ipc::LoadProgress::Completion(ipc::Completion::Failure(ipc::LoadError::ProcessSpawn { inner_error: format!("{}", error) }))).await;
             // Remove engine instance that failed to start.
             dcx.engine_instances.write().retain(|engine_instance| {
-                let engine_instance = engine_instance.read();
-                !(engine_instance.model_name() == model_name && engine_instance.engine_state == EngineState::Starting)
+                !(engine_instance.model_name() == model_name && *engine_instance.engine_state.read() == EngineState::Starting)
             });
             return;
         }
@@ -219,8 +218,7 @@ pub(crate) async fn load(
                 daemon_socket_stream.try_send(&ipc::LoadProgress::Completion(ipc::Completion::Failure(ipc_error))).await;
                 // Remove engine instance that failed to start.
                 dcx.engine_instances.write().retain(|engine_instance| {
-                    let engine_instance = engine_instance.read();
-                    !(engine_instance.model_name() == model_name && engine_instance.engine_state == EngineState::Starting)
+                    !(engine_instance.model_name() == model_name && *engine_instance.engine_state.read() == EngineState::Starting)
                 });
                 return;
             }
@@ -305,8 +303,7 @@ pub(crate) async fn load(
                     log_file.try_flush_and_sync().await;
                     // Remove engine instance if it failed while running.
                     dcx.engine_instances.write().retain(|engine_instance| {
-                        let engine_instance = engine_instance.read();
-                        !(engine_instance.model_name() == model_name && engine_instance.engine_state == EngineState::Running)
+                        !(engine_instance.model_name() == model_name && *engine_instance.engine_state.read() == EngineState::Running)
                     });
                     return exit_status;
                 }
@@ -314,14 +311,12 @@ pub(crate) async fn load(
         }
     });
 
-    let mut engine_instance_write_guard = engine_instance.write();
-    engine_instance_write_guard.running_engine = Some(RunningEngine {
+    *engine_instance.running_engine.write() = Some(RunningEngine {
         kill_signal_tx: running_engine_kill_signal_tx,
         output_hook_tx: running_engine_output_hook_tx,
         task: running_engine_task,
     });
-    engine_instance_write_guard.engine_state = EngineState::Running;
-    drop(engine_instance_write_guard);
+    *engine_instance.engine_state.write() = EngineState::Running;
 }
 
 pub(crate) async fn unload(
@@ -334,7 +329,7 @@ pub(crate) async fn unload(
     let model_engine_instance = 'model_engine_instance: {
         let mut engine_instances_write_guard = dcx.engine_instances.write();
         let Some(model_engine_instance_idx) = engine_instances_write_guard.iter()
-            .position(|engine_instance| engine_instance.read().model_name() == model_name)
+            .position(|engine_instance| engine_instance.model_name() == model_name)
         else { break 'model_engine_instance None; };
         Some(engine_instances_write_guard.remove(model_engine_instance_idx))
     };
@@ -345,12 +340,12 @@ pub(crate) async fn unload(
         return;
     };
 
-    let Some(running_engine) = model_engine_instance.write().running_engine.take() else {
+    let Some(running_engine) = model_engine_instance.running_engine.write().take() else {
         eprintln!("model `{}` loading", model_name);
         daemon_socket_stream.try_send(&ipc::UnloadProgress::BadRequest(ipc::UnloadRequestError::LoadingModel)).await;
         return;
     };
-    model_engine_instance.write().engine_state = EngineState::Stopping;
+    *model_engine_instance.engine_state.write() = EngineState::Stopping;
 
     // HACK: Setting up an async output hook and sharing the daemon socket stream to it
     //       requires lots of indirection.
@@ -405,7 +400,7 @@ pub(crate) async fn get_models(
         .map(|model_config| {
             let model_engine_instance = dcx.model_engine_instance(&model_config.name);
 
-            let model_state = match model_engine_instance.map(|engine_instance| engine_instance.read().engine_state) {
+            let model_state = match model_engine_instance.map(|engine_instance| *engine_instance.engine_state.read()) {
                 None => ipc::ModelState::NotLoaded,
                 Some(EngineState::Starting) => ipc::ModelState::Loading,
                 Some(EngineState::Running) => ipc::ModelState::Loaded,

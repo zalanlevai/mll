@@ -27,7 +27,7 @@ pub struct DaemonCtxt {
     pub(crate) config_file_path: PathBuf,
     pub(crate) loaded_config: RwLock<Config>,
     reserved_ports: RwLock<Vec<u16>>,
-    pub(crate) engine_instances: RwLock<Vec<Arc<RwLock<EngineInstance>>>>,
+    pub(crate) engine_instances: RwLock<Vec<Arc<EngineInstance>>>,
 }
 
 impl DaemonCtxt {
@@ -40,8 +40,8 @@ impl DaemonCtxt {
         }
     }
 
-    pub fn model_engine_instance(&self, model_name: &str) -> Option<Arc<RwLock<EngineInstance>>> {
-        self.engine_instances.read().iter().find(|engine_instance| engine_instance.read().model_name() == model_name).map(Arc::clone)
+    pub fn model_engine_instance(&self, model_name: &str) -> Option<Arc<EngineInstance>> {
+        self.engine_instances.read().iter().find(|engine_instance| engine_instance.model_name() == model_name).map(Arc::clone)
     }
 
     /// Return the next available engine port according to internal accounting.
@@ -57,7 +57,7 @@ impl DaemonCtxt {
         //       because their ports are sourced from previously given out port reservations,
         //       which we account for in the next step.
         let mut allocated_ports = self.engine_instances.read().iter()
-            .map(|engine_instance| engine_instance.read().engine_port)
+            .map(|engine_instance| engine_instance.engine_port)
             .collect::<Vec<_>>();
 
         // NOTE: Prevent new port reservations until we give out this one.

@@ -81,8 +81,7 @@ struct ModelObject {
 async fn handle_models_request(State(state): State<ServerState>) -> Json<ModelsResponse> {
     let model_objects = state.dcx.engine_instances.read().iter()
         .filter_map(|engine_instance| {
-            let engine_instance = engine_instance.read();
-            if engine_instance.engine_state != EngineState::Running { return None; }
+            if *engine_instance.engine_state.read() != EngineState::Running { return None; }
 
             let engine_name = match engine_instance.engine_config.kind {
                 config::EngineKind::Vllm => "vllm",
@@ -116,13 +115,12 @@ async fn handle_proxied_engine_request(State(state): State<ServerState>, request
     let Json(request_model_routing_part) = Json::<RequestModelRoutingPart>::from_bytes(&body)?;
 
     let Some(engine_instance) = state.dcx.engine_instances.read().iter().find(|engine_instance| {
-        let engine_instance = engine_instance.read();
-        engine_instance.model_name() == request_model_routing_part.model && engine_instance.engine_state == EngineState::Running
+        engine_instance.model_name() == request_model_routing_part.model && *engine_instance.engine_state.read() == EngineState::Running
     }).cloned() else {
         return Ok((StatusCode::SERVICE_UNAVAILABLE, format!("model `{}` not loaded", request_model_routing_part.model)).into_response())
     };
 
-    let engine_port = engine_instance.read().engine_port;
+    let engine_port = engine_instance.engine_port;
 
     let proxied_request = {
         let mut uri_parts = parts.uri.into_parts();

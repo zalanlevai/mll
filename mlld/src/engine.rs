@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::process::ExitStatus;
 
+use parking_lot::RwLock;
 use tokio::fs;
 use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::sync::mpsc;
@@ -108,8 +109,8 @@ pub struct EngineInstance {
     pub(crate) model_config: config::Model,
     pub(crate) log_file_path: PathBuf,
     pub(crate) engine_port: u16,
-    pub(crate) engine_state: EngineState,
-    pub(crate) running_engine: Option<RunningEngine>,
+    pub(crate) engine_state: RwLock<EngineState>,
+    pub(crate) running_engine: RwLock<Option<RunningEngine>>,
 }
 
 impl EngineInstance {
