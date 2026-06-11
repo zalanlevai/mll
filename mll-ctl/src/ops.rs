@@ -84,8 +84,8 @@ pub fn load(mut daemon_socket_stream: DaemonSocketStream, model_name: &str) -> !
     }
 }
 
-pub fn unload(mut daemon_socket_stream: DaemonSocketStream, model_name: &str) -> ! {
-    daemon_socket_stream.must_send(&ipc::ControlMessage::Unload { model_name: model_name.to_owned() });
+pub fn unload(mut daemon_socket_stream: DaemonSocketStream, model_name: &str, force: bool) -> ! {
+    daemon_socket_stream.must_send(&ipc::ControlMessage::Unload { model_name: model_name.to_owned(), force });
 
     loop {
         match daemon_socket_stream.must_recv::<ipc::UnloadProgress>() {
@@ -100,7 +100,7 @@ pub fn unload(mut daemon_socket_stream: DaemonSocketStream, model_name: &str) ->
                         process::exit(1);
                     }
                     ipc::UnloadRequestError::ModelPendingRequests => {
-                        eprintln!("model `{}` has pending requests", model_name);
+                        eprintln!("model `{}` has pending requests: use the `--force` flag to override", model_name);
                         process::exit(1);
                     }
                 }

@@ -29,6 +29,7 @@ fn main() {
         .subcommand(clap::Command::new("unload")
             .about("Unload the specified model.")
             .arg(clap::arg!(<MODEL> "Name of the model to unload, as specified in mll.toml."))
+            .arg(clap::arg!(--force "Forcefully unload models with pending requests."))
         )
         .subcommand(clap::Command::new("list")
             .about("List configured models.")
@@ -64,7 +65,8 @@ fn main() {
         }
         Some(("unload", matches)) => {
             let model_name = matches.get_one::<String>("MODEL").unwrap();
-            ops::unload(daemon_socket_stream, model_name);
+            let force = matches.get_flag("force");
+            ops::unload(daemon_socket_stream, model_name, force);
         }
         Some(("list", matches)) => {
             let filters = match matches.get_one::<String>("CATEGORY").unwrap().as_ref() {

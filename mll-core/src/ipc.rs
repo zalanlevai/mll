@@ -176,7 +176,7 @@ pub enum Completion<T, E> {
 #[serde(tag = "action")]
 pub enum ControlMessage {
     Load { model_name: String },
-    Unload { model_name: String },
+    Unload { model_name: String, force: bool },
     GetModels,
     ReloadConfig,
     GetConfig,

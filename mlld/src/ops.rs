@@ -324,6 +324,7 @@ pub(crate) async fn unload(
     dcx: Arc<DaemonCtxt>,
     mut daemon_socket_stream: AsyncDaemonSocketStream,
     model_name: String,
+    force: bool,
 ) {
     eprintln!("requested to unload model `{}`", model_name);
 
@@ -333,7 +334,7 @@ pub(crate) async fn unload(
         return;
     };
 
-    if !model_engine_instance.pending_engine_requests.read().is_empty() {
+    if !force && !model_engine_instance.pending_engine_requests.read().is_empty() {
         eprintln!("model `{}` has pending requests", model_name);
         daemon_socket_stream.try_send(&ipc::UnloadProgress::BadRequest(ipc::UnloadRequestError::ModelPendingRequests)).await;
         return;
