@@ -38,3 +38,4 @@ jobs:
       - name: Run unit tests
         run: |
           cargo test -p mlld --no-fail-fast -- --color=always
+          cargo test -p mll-ctl --no-fail-fast -- --color=always
