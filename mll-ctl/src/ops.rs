@@ -2,6 +2,8 @@ use std::process;
 
 use mll_core::ipc::{self, DaemonSocketStream};
 
+use crate::display::DurationDisplayExt;
+
 pub fn load(mut daemon_socket_stream: DaemonSocketStream, model_name: &str) -> ! {
     daemon_socket_stream.must_send(&ipc::ControlMessage::Load { model_name: model_name.to_owned() });
 
@@ -125,12 +127,17 @@ pub enum ModelListFilter {
     Inactive,
 }
 
-pub fn list_models(mut daemon_socket_stream: DaemonSocketStream, filters: Vec<ModelListFilter>) -> ! {
-    daemon_socket_stream.must_send(&ipc::ControlMessage::GetModels);
-    let models_response = daemon_socket_stream.must_recv::<ipc::GetModelsResponse>();
+pub struct ListModelsOpts {
+    pub filters: Vec<ModelListFilter>,
+    pub show_activity: bool,
+}
 
-    let filtered_models = models_response.models.into_iter().filter(|model| {
-        filters.iter().all(|filter| match filter {
+pub fn list_models(mut daemon_socket_stream: DaemonSocketStream, opts: ListModelsOpts) -> ! {
+    daemon_socket_stream.must_send(&ipc::ControlMessage::GetModels);
+    let mut models_response = daemon_socket_stream.must_recv::<ipc::GetModelsResponse>();
+
+    models_response.models.retain(|model| {
+        opts.filters.iter().all(|filter| match filter {
             ModelListFilter::Loaded => matches!(model.model_state, ipc::ModelState::Loaded(_)),
             ModelListFilter::Active => {
                 let ipc::ModelState::Loaded(loaded_model) = &model.model_state else { return false; };
@@ -143,8 +150,35 @@ pub fn list_models(mut daemon_socket_stream: DaemonSocketStream, filters: Vec<Mo
         })
     });
 
-    for model in filtered_models {
-        println!("{}", model.name);
+    let model_name_w = models_response.models.iter().map(|model| model.name.len()).max().unwrap_or(0);
+
+    for model in models_response.models {
+        print!("{:model_name_w$}", model.name);
+
+        if opts.show_activity {
+            match &model.model_state {
+                ipc::ModelState::NotLoaded => {}
+                ipc::ModelState::Loading => print!("   loading"),
+                ipc::ModelState::Loaded(loaded_model) => {
+                    match loaded_model.model_activity.latest_response_end_time {
+                        _ if loaded_model.model_activity.pending_requests_count >= 1 => {
+                            match loaded_model.model_activity.pending_requests_count {
+                                1 => print!("   active now (1 pending request)"),
+                                v => print!("   active now ({} pending requests)", v),
+                            }
+                        }
+                        Some(latest_response_end_time) => {
+                            print!("   last active {}", latest_response_end_time.elapsed().unwrap_or_default().display_imprecise_ago())
+                        }
+                        // No model request yet.
+                        None => print!("   never active"),
+                    }
+                }
+                ipc::ModelState::Unloading => print!("   unloading"),
+            }
+        }
+
+        println!();
     }
 
     process::exit(0);

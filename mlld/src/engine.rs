@@ -6,7 +6,7 @@ use std::pin::Pin;
 use std::process::ExitStatus;
 use std::sync::Arc;
 use std::sync::atomic::{self, AtomicU64};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use parking_lot::RwLock;
 use tokio::fs;
@@ -147,7 +147,21 @@ impl Deref for EngineRequestResponderHandle {
 
 impl Drop for EngineRequestResponderHandle {
     fn drop(&mut self) {
-        self.engine_instance.pending_engine_requests.write().remove(&self.request_id);
+        let mut engine_activity_write_guard = self.engine_instance.engine_activity.write();
+        engine_activity_write_guard.pending_engine_requests.remove(&self.request_id);
+        engine_activity_write_guard.latest_response_end_time = Some(SystemTime::now());
+    }
+}
+
+pub struct EngineActivity {
+    pub(crate) pending_engine_requests: HashMap<PendingEngineRequestId, Arc<PendingEngineRequest>>,
+    pub(crate) latest_request_start_time: Option<SystemTime>,
+    pub(crate) latest_response_end_time: Option<SystemTime>,
+}
+
+impl EngineActivity {
+    pub fn has_pending_requests(&self) -> bool {
+        !self.pending_engine_requests.is_empty()
     }
 }
 
@@ -158,7 +172,7 @@ pub struct EngineInstance {
     pub(crate) engine_port: u16,
     pub(crate) engine_state: RwLock<EngineState>,
     pub(crate) running_engine: RwLock<Option<RunningEngine>>,
-    pub(crate) pending_engine_requests: RwLock<HashMap<PendingEngineRequestId, Arc<PendingEngineRequest>>>,
+    pub(crate) engine_activity: RwLock<EngineActivity>,
 }
 
 impl EngineInstance {
@@ -173,7 +187,10 @@ impl EngineInstance {
             start_time: Instant::now(),
         });
 
-        self.pending_engine_requests.write().insert(pending_engine_request_id, Arc::clone(&pending_engine_request));
+        let mut engine_activity_write_guard = self.engine_activity.write();
+        engine_activity_write_guard.pending_engine_requests.insert(pending_engine_request_id, Arc::clone(&pending_engine_request));
+        engine_activity_write_guard.latest_request_start_time = Some(SystemTime::now());
+        drop(engine_activity_write_guard);
 
         EngineRequestResponderHandle {
             request_id: pending_engine_request_id,

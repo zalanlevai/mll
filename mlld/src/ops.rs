@@ -14,7 +14,7 @@ use tokio::sync::oneshot;
 use tokio::time::MissedTickBehavior;
 
 use crate::ctxt::DaemonCtxt;
-use crate::engine::{EngineInstance, EngineState, LogFile, OutputHook, OutputStream, RunningEngine};
+use crate::engine::{EngineActivity, EngineInstance, EngineState, LogFile, OutputHook, OutputStream, RunningEngine};
 
 pub(crate) async fn load(
     dcx: Arc<DaemonCtxt>,
@@ -84,7 +84,11 @@ pub(crate) async fn load(
         // NOTE: None yet, will be populated once loading is complete and the command is fulfilled,
         //       when we span another task to keep monitoring the running engine.
         running_engine: RwLock::new(None),
-        pending_engine_requests: RwLock::new(HashMap::with_capacity(256)),
+        engine_activity: RwLock::new(EngineActivity {
+            pending_engine_requests: HashMap::with_capacity(256),
+            latest_request_start_time: None,
+            latest_response_end_time: None,
+        }),
     });
     dcx.engine_instances.write().push(Arc::clone(&engine_instance));
     // NOTE: Port reservation no longer required, as the port is now associated with an engine instance.
@@ -334,7 +338,7 @@ pub(crate) async fn unload(
         return;
     };
 
-    if !force && !model_engine_instance.pending_engine_requests.read().is_empty() {
+    if !force && model_engine_instance.engine_activity.read().has_pending_requests() {
         eprintln!("model `{}` has pending requests", model_name);
         daemon_socket_stream.try_send(&ipc::UnloadProgress::BadRequest(ipc::UnloadRequestError::ModelPendingRequests)).await;
         return;
@@ -417,9 +421,14 @@ pub(crate) async fn get_models(
                 match *model_engine_instance.engine_state.read() {
                     EngineState::Starting => ipc::ModelState::Loading,
                     EngineState::Running => {
+                        let engine_activity_read_guard = model_engine_instance.engine_activity.read();
                         let model_activity = ipc::ModelActivity {
-                            pending_requests_count: model_engine_instance.pending_engine_requests.read().len(),
+                            pending_requests_count: engine_activity_read_guard.pending_engine_requests.len(),
+                            latest_request_start_time: engine_activity_read_guard.latest_request_start_time,
+                            latest_response_end_time: engine_activity_read_guard.latest_response_end_time,
                         };
+                        drop(engine_activity_read_guard);
+
                         ipc::ModelState::Loaded(ipc::LoadedModel { model_activity })
                     }
                     EngineState::Stopping => ipc::ModelState::Unloading,

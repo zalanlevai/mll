@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::io;
 use std::path::PathBuf;
+use std::time::SystemTime;
 
 use serde::{Serialize, Deserialize};
 
@@ -262,6 +263,8 @@ pub enum UnloadProgress {
 #[derive(Serialize, Deserialize)]
 pub struct ModelActivity {
     pub pending_requests_count: usize,
+    pub latest_request_start_time: Option<SystemTime>,
+    pub latest_response_end_time: Option<SystemTime>,
 }
 
 #[derive(Serialize, Deserialize)]

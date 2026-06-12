@@ -3,10 +3,11 @@ use std::process;
 use interprocess::local_socket::prelude::*;
 use mll_core::ipc::{self, DAEMON_SOCKET_PATH, DaemonSocketStream};
 
+mod display;
 mod launch;
 mod ops;
 
-use crate::ops::ModelListFilter;
+use crate::ops::{ListModelsOpts, ModelListFilter};
 
 fn main() {
     let matches = clap::command!()
@@ -34,6 +35,7 @@ fn main() {
         .subcommand(clap::Command::new("list")
             .about("List configured models.")
             .arg(clap::arg!([CATEGORY] "List only the specified models.").value_parser(["all", "loaded", "active", "inactive"]).default_value("all"))
+            .arg(clap::arg!(--activity "Show information about model requests."))
         )
         .subcommand(clap::Command::new("reload-config")
             .about("Reload configuration options from the configuration file.")
@@ -76,7 +78,9 @@ fn main() {
                 "inactive" => vec![ModelListFilter::Inactive],
                 _ => unreachable!("invalid category argument"),
             };
-            ops::list_models(daemon_socket_stream, filters);
+            let show_activity = matches.get_flag("activity");
+            let opts = ListModelsOpts { filters, show_activity };
+            ops::list_models(daemon_socket_stream, opts);
         }
         Some(("reload-config", matches)) => {
             ops::reload_config(daemon_socket_stream);
