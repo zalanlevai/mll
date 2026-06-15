@@ -20,10 +20,47 @@ pub struct Engine {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
+pub struct MemorySpec {
+    gib: Option<f64>,
+    mib: Option<f64>,
+    kib: Option<f64>,
+    bytes: Option<u64>,
+}
+
+impl MemorySpec {
+    pub fn bytes(&self) -> u64 {
+        let mut total_bytes = 0;
+
+        if let Some(memory_gib) = self.gib {
+            total_bytes += (memory_gib * 1024_f64 * 1024_f64 * 1024_f64) as u64;
+        }
+        if let Some(memory_mib) = self.mib {
+            total_bytes += (memory_mib * 1024_f64 * 1024_f64) as u64;
+        }
+        if let Some(memory_kib) = self.kib {
+            total_bytes += (memory_kib * 1024_f64) as u64;
+        }
+        if let Some(memory_bytes) = self.bytes {
+            total_bytes += memory_bytes;
+        }
+
+        total_bytes
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum MemoryRequirement {
+    Relative { pct: f64 },
+    Absolute(MemorySpec),
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Model {
     pub name: String,
     pub engine: String,
     pub path: PathBuf,
+    pub gpu_memory: MemoryRequirement,
     pub max_context_tokens: usize,
     pub engine_args: Vec<String>,
 }

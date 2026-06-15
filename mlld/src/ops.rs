@@ -3,7 +3,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
-use mll_core::config::Config;
+use mll_core::config::{self, Config};
 use mll_core::ipc::{self, AsyncDaemonSocketStream};
 use parking_lot::RwLock;
 use tokio::fs;
@@ -43,6 +43,8 @@ pub(crate) async fn load(
         return;
     };
 
+    let gpu_memory_usage_snapshot = dcx.gpu_memory_usage_snapshot();
+
     let engine_port_reservation = dcx.next_available_port();
 
     let logs_dir_path = dcx.loaded_config.read().logs_dir_path();
@@ -74,6 +76,28 @@ pub(crate) async fn load(
     cmd.arg(format!("--served-model-name={}", model_name));
     cmd.arg(format!("--port={}", engine_port_reservation.port()));
     cmd.arg(format!("--max-model-len={}", model_config.max_context_tokens));
+
+    match &model_config.gpu_memory {
+        config::MemoryRequirement::Relative { pct } => {
+            cmd.arg(format!("--gpu-memory-utilization={}", pct));
+        }
+        config::MemoryRequirement::Absolute(memory_spec) => {
+            let Some(gpu_memory_usage_snapshot) = &gpu_memory_usage_snapshot else {
+                eprintln!("error: cannot set GPU memory requirement: cannot determine total GPU memory: no GPU monitoring interface");
+                daemon_socket_stream.try_send(&ipc::LoadProgress::BadRequest(ipc::LoadRequestError::ConfigMemReqRequiresMissingGpuMonitoringInterface)).await;
+                return;
+            };
+            // FIXME: This should be determined based on the GPU(s) the model is being loaded onto.
+            let [first_gpu_device, ..] = &gpu_memory_usage_snapshot.gpu_devices[..] else {
+                eprintln!("error: cannot set GPU memory requirement: cannot determine total GPU memory: no GPUs detected");
+                daemon_socket_stream.try_send(&ipc::LoadProgress::BadRequest(ipc::LoadRequestError::ConfigMemReqRequiresMissingGpuInfo)).await;
+                return;
+            };
+            let pct = memory_spec.bytes() as f64 / first_gpu_device.total_memory_bytes as f64;
+            cmd.arg(format!("--gpu-memory-utilization={}", pct));
+        }
+    }
+
     cmd.args(&model_config.engine_args);
 
     let engine_instance = Arc::new(EngineInstance {

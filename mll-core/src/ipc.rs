@@ -191,6 +191,8 @@ pub enum LoadRequestError {
     UnknownModel,
     AlreadyLoadedModel,
     BadConfig { msg: String },
+    ConfigMemReqRequiresMissingGpuMonitoringInterface,
+    ConfigMemReqRequiresMissingGpuInfo,
 }
 
 #[derive(Serialize, Deserialize)]

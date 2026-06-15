@@ -23,6 +23,14 @@ pub fn load(mut daemon_socket_stream: DaemonSocketStream, model_name: &str) -> !
                         eprintln!("error: bad configuration: {}", error);
                         process::exit(1);
                     }
+                    ipc::LoadRequestError::ConfigMemReqRequiresMissingGpuMonitoringInterface => {
+                        eprintln!("error: cannot set GPU memory requirement: cannot determine total GPU memory: no GPU monitoring interface");
+                        process::exit(1);
+                    }
+                    ipc::LoadRequestError::ConfigMemReqRequiresMissingGpuInfo => {
+                        eprintln!("error: cannot set GPU memory requirement: cannot determine total GPU memory: missing GPU info");
+                        process::exit(1);
+                    }
                 }
             }
             ipc::LoadProgress::Milestone(load_milestone) => {
