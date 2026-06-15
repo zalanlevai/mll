@@ -37,6 +37,9 @@ fn main() {
             .arg(clap::arg!([CATEGORY] "List only the specified models.").value_parser(["all", "loaded", "active", "inactive"]).default_value("all"))
             .arg(clap::arg!(--activity "Show information about model requests."))
         )
+        .subcommand(clap::Command::new("usage")
+            .about("Print resource usage information.")
+        )
         .subcommand(clap::Command::new("reload-config")
             .about("Reload configuration options from the configuration file.")
         )
@@ -82,7 +85,10 @@ fn main() {
             let opts = ListModelsOpts { filters, show_activity };
             ops::list_models(daemon_socket_stream, opts);
         }
-        Some(("reload-config", matches)) => {
+        Some(("usage", _matches)) => {
+            ops::usage(daemon_socket_stream);
+        }
+        Some(("reload-config", _matches)) => {
             ops::reload_config(daemon_socket_stream);
         }
         Some(("launch", matches)) => {

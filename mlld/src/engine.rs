@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::{self, Debug};
 use std::io;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
@@ -104,9 +105,17 @@ pub enum OutputStream {
 pub(crate) type OutputHook = Box<dyn FnMut(OutputStream, String) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>> + Send + Sync + 'static>;
 
 pub struct RunningEngine {
+    pub(crate) main_process_id: u32,
+    pub(crate) gpu_process_id: Option<u32>,
     pub(crate) kill_signal_tx: oneshot::Sender<()>,
     pub(crate) output_hook_tx: mpsc::Sender<Option<OutputHook>>,
     pub(crate) task: JoinHandle<ExitStatus>,
+}
+
+impl RunningEngine {
+    pub fn gpu_process_id(&self) -> u32 {
+        self.gpu_process_id.unwrap_or(self.main_process_id)
+    }
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
@@ -197,6 +206,13 @@ impl EngineInstance {
             engine_instance: Arc::clone(self),
             request: pending_engine_request,
         }
+    }
+}
+
+impl Debug for EngineInstance {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "EngineInstance({:?})", self.model_name())?;
+        Ok(())
     }
 }
 

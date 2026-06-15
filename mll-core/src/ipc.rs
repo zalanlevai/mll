@@ -179,6 +179,7 @@ pub enum ControlMessage {
     Load { model_name: String },
     Unload { model_name: String, force: bool },
     GetModels,
+    GetUsage,
     ReloadConfig,
     GetConfig,
 }
@@ -292,6 +293,40 @@ pub struct Model {
 #[derive(Serialize, Deserialize)]
 pub struct GetModelsResponse {
     pub models: Vec<Model>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GpuDevice {
+    pub index: usize,
+    pub name: String,
+    pub total_memory_bytes: u64,
+    pub free_memory_bytes: u64,
+    pub reserved_memory_bytes: u64,
+    pub used_memory_bytes: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum GpuAllocationOwner {
+    Model { model_name: String },
+    Other { process_id: u32 },
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GpuAllocation {
+    pub owner: GpuAllocationOwner,
+    pub gpu_index: usize,
+    pub memory_bytes: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GpuUsage {
+    pub gpu_devices: Vec<GpuDevice>,
+    pub gpu_allocations: Vec<GpuAllocation>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GetUsageResponse {
+    pub gpu_usage: Option<GpuUsage>,
 }
 
 #[derive(Serialize, Deserialize)]

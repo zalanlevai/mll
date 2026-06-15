@@ -2,7 +2,7 @@ use std::process;
 
 use mll_core::ipc::{self, DaemonSocketStream};
 
-use crate::display::DurationDisplayExt;
+use crate::display::{DurationDisplayExt, MemoryDisplayExt, MemoryUnit};
 
 pub fn load(mut daemon_socket_stream: DaemonSocketStream, model_name: &str) -> ! {
     daemon_socket_stream.must_send(&ipc::ControlMessage::Load { model_name: model_name.to_owned() });
@@ -179,6 +179,52 @@ pub fn list_models(mut daemon_socket_stream: DaemonSocketStream, opts: ListModel
         }
 
         println!();
+    }
+
+    process::exit(0);
+}
+
+pub fn usage(mut daemon_socket_stream: DaemonSocketStream) -> ! {
+    daemon_socket_stream.must_send(&ipc::ControlMessage::GetUsage);
+    let usage_response = daemon_socket_stream.must_recv::<ipc::GetUsageResponse>();
+
+    let Some(gpu_usage) = usage_response.gpu_usage else {
+        eprintln!("error: cannot read resource usage metrics");
+        process::exit(1);
+    };
+
+    const OWNER_MIN_LEN: usize = "<free>".len();
+    let owner_w = gpu_usage.gpu_allocations.iter()
+        .map(|gpu_allocation| {
+            match &gpu_allocation.owner {
+                ipc::GpuAllocationOwner::Model { model_name } => model_name.len(),
+                ipc::GpuAllocationOwner::Other { process_id } => "other ()".len() + process_id.checked_ilog10().unwrap_or(0) as usize + 1,
+            }
+        })
+        .max()
+        .unwrap_or(0);
+    let owner_w = usize::max(owner_w, OWNER_MIN_LEN);
+
+    let mut gpu_devices_iter = gpu_usage.gpu_devices.iter().peekable();
+    while let Some(gpu_device) = gpu_devices_iter.next() {
+        let used_memory_display = (gpu_device.used_memory_bytes + gpu_device.reserved_memory_bytes).display_memory_in(MemoryUnit::GiB);
+        let total_memory_display = gpu_device.total_memory_bytes.display_memory_in(MemoryUnit::GiB);
+        println!("GPU {}: {} ({} / {})", gpu_device.index, gpu_device.name, used_memory_display, total_memory_display);
+
+        let gpu_device_allocations = gpu_usage.gpu_allocations.iter().filter(|gpu_allocation| gpu_allocation.gpu_index == gpu_device.index);
+
+        for gpu_allocation in gpu_device_allocations {
+            match &gpu_allocation.owner {
+                ipc::GpuAllocationOwner::Model { model_name } => print!("{:owner_w$}", model_name),
+                ipc::GpuAllocationOwner::Other { process_id } => print!("{:owner_w$}", format!("other ({})", process_id)),
+            }
+            print!("   {}", gpu_allocation.memory_bytes.display_memory());
+            println!();
+        }
+
+        println!("{:owner_w$}   {}", "<free>", gpu_device.free_memory_bytes.display_memory());
+
+        if gpu_devices_iter.peek().is_some() { println!(); }
     }
 
     process::exit(0);

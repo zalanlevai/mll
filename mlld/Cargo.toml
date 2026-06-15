@@ -22,3 +22,4 @@ http-body-util = "0.1"
 hyper-util = { version = "0.1", features = ["tokio", "client-legacy"] }
 
 nix = { version = "0.31", features = ["signal"] }
+nvml-wrapper = "0.12"

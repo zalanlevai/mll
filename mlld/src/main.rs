@@ -5,6 +5,7 @@ use std::process;
 use std::sync::Arc;
 
 use interprocess::local_socket::tokio::prelude::*;
+use nvml_wrapper::Nvml;
 use mll_core::config::{self, DEFAULT_CONFIG_FILE_PATH, Config};
 use mll_core::ipc::{self, DAEMON_SOCKET_PATH, AsyncDaemonSocketStream, DaemonSocketReadError};
 use tokio::net::TcpListener;
@@ -12,9 +13,11 @@ use tokio::net::TcpListener;
 mod ctxt;
 mod engine;
 mod gateway;
+mod host;
 mod ops;
 
 use crate::ctxt::DaemonCtxt;
+use crate::host::{GpuMonitoringInterface, GpuMonitoringInterfaceHandle};
 
 async fn handle_ipc_control_request(dcx: Arc<DaemonCtxt>, mut daemon_socket_stream: AsyncDaemonSocketStream) {
     let control_msg = match daemon_socket_stream.recv::<ipc::ControlMessage>().await {
@@ -34,6 +37,7 @@ async fn handle_ipc_control_request(dcx: Arc<DaemonCtxt>, mut daemon_socket_stre
         ipc::ControlMessage::Load { model_name } => ops::load(dcx, daemon_socket_stream, model_name).await,
         ipc::ControlMessage::Unload { model_name, force } => ops::unload(dcx, daemon_socket_stream, model_name, force).await,
         ipc::ControlMessage::GetModels => ops::get_models(dcx, daemon_socket_stream).await,
+        ipc::ControlMessage::GetUsage => ops::get_usage(dcx, daemon_socket_stream).await,
         ipc::ControlMessage::ReloadConfig => ops::reload_config(dcx, daemon_socket_stream).await,
         ipc::ControlMessage::GetConfig => ops::get_config(dcx, daemon_socket_stream).await,
     }
@@ -73,6 +77,22 @@ async fn main() {
         }
     };
 
+    let gpu_monitoring_interface_handle = match Nvml::init() {
+        Ok(nvml) => GpuMonitoringInterfaceHandle::Nvidia(nvml),
+        Err(error) => {
+            eprintln!("warning: cannot monitor GPUs: cannot load nvml: {}", error);
+            GpuMonitoringInterfaceHandle::None
+        }
+    };
+    let gpu_monitoring_interface = GpuMonitoringInterface::new(gpu_monitoring_interface_handle);
+
+    // Enumerate GPU devices at startup.
+    if let Some(gpu_memory_usage_snapshot) = gpu_monitoring_interface.memory_usage_snapshot(&[]) {
+        for gpu_device in &gpu_memory_usage_snapshot.gpu_devices {
+            eprintln!("GPU {}: {} ({} bytes)", gpu_device.index, gpu_device.name, gpu_device.total_memory_bytes);
+        }
+    }
+
     let daemon_socket_parent_dir_path = Path::new(DAEMON_SOCKET_PATH).parent().expect("invalid daemon socket path");
     if let Err(error) = fs::create_dir_all(daemon_socket_parent_dir_path) {
         eprintln!("cannot create daemon directory `{}`: {}", daemon_socket_parent_dir_path.display(), error);
@@ -104,7 +124,7 @@ async fn main() {
 
     eprintln!("daemon started: listening on socket `{}`", DAEMON_SOCKET_PATH);
 
-    let dcx = Arc::new(DaemonCtxt::new(config_file_path, config));
+    let dcx = Arc::new(DaemonCtxt::new(config_file_path, config, gpu_monitoring_interface));
 
     let ipc_dcx = Arc::clone(&dcx);
     tokio::spawn(async move {

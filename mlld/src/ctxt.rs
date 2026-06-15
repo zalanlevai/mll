@@ -5,6 +5,7 @@ use parking_lot::RwLock;
 use mll_core::config::Config;
 
 use crate::engine::{self, EngineInstance};
+use crate::host::{GpuMonitoringInterface, GpuMonitoringSnapshot};
 
 pub struct PortReservation {
     dcx: Arc<DaemonCtxt>,
@@ -26,18 +27,24 @@ impl Drop for PortReservation {
 pub struct DaemonCtxt {
     pub(crate) config_file_path: PathBuf,
     pub(crate) loaded_config: RwLock<Config>,
+    pub(crate) gpu_monitoring_interface: GpuMonitoringInterface,
     reserved_ports: RwLock<Vec<u16>>,
     pub(crate) engine_instances: RwLock<Vec<Arc<EngineInstance>>>,
 }
 
 impl DaemonCtxt {
-    pub fn new(config_file_path: PathBuf, config: Config) -> Self {
+    pub fn new(config_file_path: PathBuf, config: Config, gpu_monitoring_interface: GpuMonitoringInterface) -> Self {
         Self {
             config_file_path,
             loaded_config: RwLock::new(config),
+            gpu_monitoring_interface,
             reserved_ports: RwLock::new(Vec::with_capacity(8)),
             engine_instances: RwLock::new(Vec::with_capacity(64)),
         }
+    }
+
+    pub fn gpu_memory_usage_snapshot(&self) -> Option<Arc<GpuMonitoringSnapshot>> {
+        self.gpu_monitoring_interface.memory_usage_snapshot(&self.engine_instances.read())
     }
 
     pub fn model_engine_instance(&self, model_name: &str) -> Option<Arc<EngineInstance>> {

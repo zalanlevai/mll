@@ -15,6 +15,7 @@ use tokio::time::MissedTickBehavior;
 
 use crate::ctxt::DaemonCtxt;
 use crate::engine::{EngineActivity, EngineInstance, EngineState, LogFile, OutputHook, OutputStream, RunningEngine};
+use crate::host::GpuAllocationOwner;
 
 pub(crate) async fn load(
     dcx: Arc<DaemonCtxt>,
@@ -135,6 +136,9 @@ pub(crate) async fn load(
         }
     };
 
+    // NOTE: The process ID can never be missing as we do not reap the child process before this.
+    let child_process_id = child.id().expect("engine child process id missing");
+
     let stdout = child.stdout.take().expect("engine child process stdout handle missing");
     let stderr = child.stderr.take().expect("engine child process stderr handle missing");
 
@@ -148,6 +152,7 @@ pub(crate) async fn load(
     flush_and_sync_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
     let mut startup_failre_reason: Option<ipc::EngineStartupFailureReason> = None;
+    let mut gpu_process_id: Option<u32> = None;
 
     loop {
         tokio::select! { biased;
@@ -164,6 +169,15 @@ pub(crate) async fn load(
                         log_file.try_write("stdout: ").await;
                         log_file.try_write_line(&line).await;
                         daemon_socket_stream.try_send(&ipc::LoadProgress::StdoutLine { line: line.clone() }).await;
+
+                        if let None = gpu_process_id {
+                            if let Some(string_starting_with_pid) = line.strip_prefix("(EngineCore pid=")
+                                && let Some((pid_str, _)) = string_starting_with_pid.split_once(')')
+                                && let Ok(process_id) = pid_str.parse::<u32>()
+                            {
+                                gpu_process_id = Some(process_id);
+                            }
+                        }
 
                         if line.contains("ERROR") {
                             match () {
@@ -317,6 +331,8 @@ pub(crate) async fn load(
     });
 
     *engine_instance.running_engine.write() = Some(RunningEngine {
+        main_process_id: child_process_id,
+        gpu_process_id,
         kill_signal_tx: running_engine_kill_signal_tx,
         output_hook_tx: running_engine_output_hook_tx,
         task: running_engine_task,
@@ -444,6 +460,45 @@ pub(crate) async fn get_models(
         .collect::<Vec<_>>();
 
     daemon_socket_stream.try_send(&ipc::GetModelsResponse { models }).await;
+}
+
+pub(crate) async fn get_usage(
+    dcx: Arc<DaemonCtxt>,
+    mut daemon_socket_stream: AsyncDaemonSocketStream,
+) {
+    eprintln!("requested usage");
+
+    let gpu_usage = dcx.gpu_memory_usage_snapshot().map(|gpu_memory_usage_snapshot| {
+        let gpu_devices = gpu_memory_usage_snapshot.gpu_devices.iter()
+            .map(|gpu_device| {
+                ipc::GpuDevice {
+                    index: gpu_device.index,
+                    name: gpu_device.name.clone(),
+                    total_memory_bytes: gpu_device.total_memory_bytes,
+                    free_memory_bytes: gpu_device.free_memory_bytes,
+                    reserved_memory_bytes: gpu_device.reserved_memory_bytes,
+                    used_memory_bytes: gpu_device.used_memory_bytes,
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let gpu_allocations = gpu_memory_usage_snapshot.gpu_allocations.iter()
+            .map(|gpu_allocation| {
+                ipc::GpuAllocation {
+                    owner: match &gpu_allocation.owner {
+                        GpuAllocationOwner::EngineInstance(engine_instance) => ipc::GpuAllocationOwner::Model { model_name: engine_instance.model_name().to_owned() },
+                        &GpuAllocationOwner::Other { process_id } => ipc::GpuAllocationOwner::Other { process_id },
+                    },
+                    gpu_index: gpu_allocation.gpu_index,
+                    memory_bytes: gpu_allocation.memory_bytes,
+                }
+            })
+            .collect::<Vec<_>>();
+
+        ipc::GpuUsage { gpu_devices, gpu_allocations }
+    });
+
+    daemon_socket_stream.try_send(&ipc::GetUsageResponse { gpu_usage }).await;
 }
 
 pub(crate) async fn reload_config(
